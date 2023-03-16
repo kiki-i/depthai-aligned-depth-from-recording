@@ -3,26 +3,27 @@ import depthai as dai
 import numpy as np
 
 import datetime
+import re
 
 from pathlib import Path
 
 
 class DepthEstimator():
 
-  def __init__(self, calibration: dai.CalibrationHandler, preview: bool,
-               mode: str, subpixel: bool, extended: bool):
+  def __init__(self, preview: bool, mode: str, subpixel: bool, extended: bool):
     modeMap = {
         "density": dai.node.StereoDepth.PresetMode.HIGH_DENSITY,
         "accuracy": dai.node.StereoDepth.PresetMode.HIGH_ACCURACY
     }
 
-    self.calibration = calibration
     self.mode = modeMap[mode]
     self.preview = preview
     self.subpixel = subpixel
     self.extended = extended
 
-  def initPipeline(self, rgbRes: tuple, monoRes: tuple):
+  def initPipeline(self, calibration: dai.CalibrationHandler, rgbRes: tuple,
+                   monoRes: tuple):
+    self.calibration = calibration
     self.rgbRes = rgbRes
     self.monoRes = monoRes
 
@@ -62,26 +63,41 @@ class DepthEstimator():
       self.maxDisparity = maxDisparity
     return pipeline
 
-  def estimateFromVideo(self, rgbPath: Path, leftPath: Path, rightPath: Path,
-                        outputDirPath: Path) -> bool:
-    # Check output path
-    if not outputDirPath.exists():
-      outputDirPath.mkdir(parents=True, exist_ok=True)
+  def estimateFromVideo(self, inputDirPath: Path, outputDirPath: Path) -> bool:
+
+    # Init path
+    for path in inputDirPath.iterdir():
+      if path.stem.endswith(f"rgb"):
+        rgbPath = path
+      if path.stem.endswith(f"left"):
+        leftPath = path
+      if path.stem.endswith(f"right"):
+        rightPath = path
+
+    timestampPath = inputDirPath.joinpath(f"timestamp.txt")
+    calibration = dai.CalibrationHandler(
+        inputDirPath.joinpath("calibration.json"))
+
+    outputDirPath.mkdir(parents=True, exist_ok=True)
 
     # Get video
-    rgbCapture = cv2.VideoCapture(str(rgbPath))
     leftCapture = cv2.VideoCapture(str(leftPath))
     rightCapture = cv2.VideoCapture(str(rightPath))
-    rgbRes = (int(rgbCapture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-              int(rgbCapture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    monoRes = (int(leftCapture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-               int(leftCapture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+
+    # Get resolution
+    resMap = {
+        "12MP": (4056, 3040),
+        "4K": (3840, 2160),
+        "1080P": (1920, 1080),
+        "800P": (1280, 800),
+        "720P": (1280, 720),
+        "400P": (640, 400)
+    }
+    rgbRes = resMap[re.search(r"\[(.+)?\]", str(rgbPath.stem)).group(1)]
+    monoRes = resMap[re.search(r"\[(.+)?\]", str(leftPath.stem)).group(1)]
 
     # Init output subdir path
-    filename = rgbPath.name
-    tagHeadIndex = filename.index("[")
-    tagTailIndex = len(filename) - filename[::-1].index("]")
-    tag = filename[tagHeadIndex:tagTailIndex]
+    tag = inputDirPath.name
     if self.subpixel:
       tag += "[Subpixel]"
     if self.extended:
@@ -89,8 +105,9 @@ class DepthEstimator():
     subDirPath = outputDirPath.joinpath(f"{tag}/")
     subDirPath.mkdir(exist_ok=True)
 
-    self.pipeline = self.initPipeline(rgbRes, monoRes)
-    with dai.Device(self.pipeline) as device:
+    self.pipeline = self.initPipeline(calibration, rgbRes, monoRes)
+    with dai.Device(self.pipeline) as device, open(timestampPath,
+                                                   "rt") as timestampFile:
       # Init queues
       leftInQ = device.getInputQueue("leftIn", 100, blocking=True)
       rightInQ = device.getInputQueue("rightIn", 100, blocking=True)
@@ -104,17 +121,21 @@ class DepthEstimator():
       while True:
         try:
           print(f"\r{tag}: Frame {index}...", end="")
-          # Send stereo frames
+
+          # Read files
           leftExist, leftFrame = leftCapture.read()
           rightExist, rightFrame = rightCapture.read()
+          timestamp = timestampFile.readline().rstrip().replace(":", ";")
+
           if leftExist and rightExist:
-            timestamp = datetime.timedelta(index)
+            # Create ImgFrame for StereoDepth node
+            frameTimestamp = datetime.timedelta(index)
 
             leftFrame = cv2.cvtColor(leftFrame, cv2.COLOR_BGR2GRAY)
             leftImage = dai.ImgFrame()
             leftImage.setData(
                 leftFrame.reshape(self.monoRes[0] * self.monoRes[1]))
-            leftImage.setTimestamp(timestamp)
+            leftImage.setTimestamp(frameTimestamp)
             leftImage.setInstanceNum(dai.CameraBoardSocket.LEFT)
             leftImage.setType(dai.ImgFrame.Type.RAW8)
             leftImage.setWidth(self.monoRes[0])
@@ -124,7 +145,7 @@ class DepthEstimator():
             rightImage = dai.ImgFrame()
             rightImage.setData(
                 rightFrame.reshape(self.monoRes[0] * self.monoRes[1]))
-            rightImage.setTimestamp(timestamp)
+            rightImage.setTimestamp(frameTimestamp)
             rightImage.setInstanceNum(dai.CameraBoardSocket.RIGHT)
             rightImage.setType(dai.ImgFrame.Type.RAW8)
             rightImage.setWidth(self.monoRes[0])
@@ -135,7 +156,7 @@ class DepthEstimator():
 
             # Get depth output
             depthFrame = depthOutQ.get().getFrame()
-            depthPath = subDirPath.joinpath(f"{str(index).zfill(10)}.npy")
+            depthPath = subDirPath.joinpath(f"{timestamp}.npy")
             np.save(str(depthPath), depthFrame)
 
             # Display disparity preview
@@ -150,17 +171,18 @@ class DepthEstimator():
                 disparityFrame = np.ascontiguousarray(disparityFrame)
                 cv2.imshow("Preview", disparityFrame)
                 if cv2.waitKey(1) == ord("q"):
+                  print("\nCancel...")
                   break
 
             index += 1
           else:
+            print()
             break
         except KeyboardInterrupt:
           canceled = True
           print("\nCancel...")
           break
 
-    rgbCapture.release()
     leftCapture.release()
     rightCapture.release()
 

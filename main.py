@@ -14,32 +14,26 @@ if __name__ == "__main__":
   print("Init...")
   cliArgs = parseCli()
   inputDirPath = Path(cliArgs.input)
+  if not inputDirPath.exists():
+    raise FileNotFoundError(f"{inputDirPath.absolute()} don't esist!")
 
   ## Check output path
   outputDirPath = Path(cliArgs.out)
-  if not outputDirPath.exists():
-    outputDirPath.mkdir(parents=True, exist_ok=True)
+  outputDirPath.mkdir(parents=True, exist_ok=True)
 
   ## Get file list
-  inputStereos = parseInputStereo(inputDirPath)
-  results = {}
+  inputDirs: list[Path] = []
+  for path in inputDirPath.iterdir():
+    if path.is_dir():
+      inputDirs.append(path)
 
-  for inputStereo in inputStereos:
-    calibration = dai.CalibrationHandler(
-        inputDirPath.joinpath(inputStereo + "calibration.json"))
-    depthEstimator = DepthEstimator(calibration, cliArgs.preview, cliArgs.mode,
+  results: dict[Path, bool] = {}
+  for inputDir in inputDirs:
+    depthEstimator = DepthEstimator(cliArgs.preview, cliArgs.mode,
                                     cliArgs.subpixel, cliArgs.extended)
 
-    extension = ""
-    if inputDirPath.joinpath(inputStereo + "rgb.h265").exists():
-      extension = "h265"
-    if inputDirPath.joinpath(inputStereo + "rgb.mjpeg").exists():
-      extension = "mjpeg"
-
-    results[inputStereo] = depthEstimator.estimateFromVideo(
-        inputDirPath.joinpath(inputStereo + f"rgb.{extension}"),
-        inputDirPath.joinpath(inputStereo + f"left.{extension}"),
-        inputDirPath.joinpath(inputStereo + f"right.{extension}"),
+    results[inputDir] = depthEstimator.estimateFromVideo(
+        inputDir,
         outputDirPath,
     )
 

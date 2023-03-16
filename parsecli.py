@@ -52,18 +52,3 @@ def parseCli():
       help="Enable extended disparity")
   args = parser.parse_args()
   return args
-
-
-def parseInputStereo(inputDirPath: Path) -> set[str]:
-  if not inputDirPath.exists():
-    raise FileNotFoundError(f"{inputDirPath.absolute()} don't esist!")
-
-  inputStereos: set[str] = set()
-  for file in inputDirPath.iterdir():
-    filename = file.name
-    if filename.endswith(".json"):
-      tagHeadIndex = filename.index("[")
-      tagTailIndex = len(filename) - filename[::-1].index("]")
-      inputStereos.add(filename[tagHeadIndex:tagTailIndex])
-
-  return inputStereos
