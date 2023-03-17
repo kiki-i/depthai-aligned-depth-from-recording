@@ -109,15 +109,15 @@ class DepthEstimator():
     with dai.Device(self.pipeline) as device, open(timestampPath,
                                                    "rt") as timestampFile:
       # Init queues
-      leftInQ = device.getInputQueue("leftIn", 100, blocking=True)
-      rightInQ = device.getInputQueue("rightIn", 100, blocking=True)
-      depthOutQ = device.getOutputQueue("depthOut", 100, blocking=True)
+      leftInQ = device.getInputQueue("leftIn", 10, blocking=True)
+      rightInQ = device.getInputQueue("rightIn", 10, blocking=True)
+      depthOutQ = device.getOutputQueue("depthOut", 10, blocking=True)
       if self.preview:
         disparityOutQ = device.getOutputQueue(
             "disparityOut", 10, blocking=False)
 
       index: int = 0
-      canceled: bool = False
+      canceled: bool = True
       while True:
         try:
           print(f"\r{tag}: Frame {index}...", end="")
@@ -176,10 +176,10 @@ class DepthEstimator():
 
             index += 1
           else:
+            canceled = False
             print()
             break
         except KeyboardInterrupt:
-          canceled = True
           print("\nCancel...")
           break
 
