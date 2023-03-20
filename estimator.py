@@ -2,9 +2,9 @@ import cv2
 import depthai as dai
 import numpy as np
 
-import datetime
 import re
 
+from datetime import timedelta
 from pathlib import Path
 
 
@@ -21,8 +21,26 @@ class DepthEstimator():
     self.subpixel = subpixel
     self.extended = extended
 
-  def initPipeline(self, calibration: dai.CalibrationHandler, rgbRes: tuple,
-                   monoRes: tuple):
+  def __createPreviewWindow(self, windowName: str):
+    self.__depthWeight = 100
+    self.__rgbWeight = 0
+    cv2.namedWindow(windowName)
+    cv2.createTrackbar("Depth%", windowName, self.__depthWeight, 100,
+                       self.__updateBlendWeights)
+
+  def __createDaiFrame(self, cvFrame: cv2.Mat, timestamp: timedelta,
+                       res: tuple[int, int], instance, type) -> dai.ImgFrame:
+    daiFrame = dai.ImgFrame()
+    daiFrame.setData(cvFrame.reshape(res[0] * res[1]))
+    daiFrame.setWidth(res[0])
+    daiFrame.setHeight(res[1])
+    daiFrame.setTimestamp(timestamp)
+    daiFrame.setInstanceNum(instance)
+    daiFrame.setType(type)
+    return daiFrame
+
+  def __initPipeline(self, calibration: dai.CalibrationHandler, rgbRes: tuple,
+                     monoRes: tuple):
     self.calibration = calibration
     self.rgbRes = rgbRes
     self.monoRes = monoRes
@@ -60,8 +78,31 @@ class DepthEstimator():
       stereo.disparity.link(disparityOut.input)
       disparityOut.setStreamName("disparityOut")
       maxDisparity = stereo.initialConfig.getMaxDisparity()
-      self.maxDisparity = maxDisparity
+      self.__maxDisparity = maxDisparity
     return pipeline
+
+  def __showPreview(self,
+                    rgbFrame: cv2.Mat,
+                    disparityFrame: np.ndarray,
+                    windowsName: str = "",
+                    text: str = ""):
+    disparityFrame = (disparityFrame * 255. / self.__maxDisparity).astype(
+        np.uint8)
+    disparityFrame = cv2.applyColorMap(disparityFrame, cv2.COLORMAP_BONE)
+    disparityFrame = np.ascontiguousarray(disparityFrame)
+
+    if len(disparityFrame.shape) < 3:
+      disparityFrame = cv2.cvtColor(disparityFrame, cv2.COLOR_GRAY2BGR)
+    blended = cv2.addWeighted(rgbFrame,
+                              float(self.__rgbWeight) / 100, disparityFrame,
+                              float(self.__depthWeight) / 100, 0)
+    cv2.putText(blended, text, (0, 30), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                (255, 255, 255), 3)
+    cv2.imshow(windowsName, blended)
+
+  def __updateBlendWeights(self, depthPercent):
+    self.__depthWeight = depthPercent
+    self.__rgbWeight = 100 - self.__depthWeight
 
   def estimateFromVideo(self, inputDirPath: Path, outputDirPath: Path) -> bool:
 
@@ -84,6 +125,11 @@ class DepthEstimator():
     leftCapture = cv2.VideoCapture(str(leftPath))
     rightCapture = cv2.VideoCapture(str(rightPath))
 
+    # Init preview
+    if self.preview:
+      rgbCapture = cv2.VideoCapture(str(rgbPath))
+      self.__createPreviewWindow("Preview")
+
     # Get resolution
     resMap = {
         "12MP": (4056, 3040),
@@ -105,7 +151,7 @@ class DepthEstimator():
     subDirPath = outputDirPath.joinpath(f"{tag}/")
     subDirPath.mkdir(exist_ok=True)
 
-    self.pipeline = self.initPipeline(calibration, rgbRes, monoRes)
+    self.pipeline = self.__initPipeline(calibration, rgbRes, monoRes)
     with dai.Device(self.pipeline) as device, open(timestampPath,
                                                    "rt") as timestampFile:
       # Init queues
@@ -125,51 +171,39 @@ class DepthEstimator():
           # Read files
           leftExist, leftFrame = leftCapture.read()
           rightExist, rightFrame = rightCapture.read()
-          timestamp = timestampFile.readline().rstrip().replace(":", ";")
+          timestamp = timestampFile.readline().rstrip()
 
           if leftExist and rightExist:
             # Create ImgFrame for StereoDepth node
-            frameTimestamp = datetime.timedelta(index)
+            frameTimestamp = timedelta(index)
 
             leftFrame = cv2.cvtColor(leftFrame, cv2.COLOR_BGR2GRAY)
-            leftImage = dai.ImgFrame()
-            leftImage.setData(
-                leftFrame.reshape(self.monoRes[0] * self.monoRes[1]))
-            leftImage.setTimestamp(frameTimestamp)
-            leftImage.setInstanceNum(dai.CameraBoardSocket.LEFT)
-            leftImage.setType(dai.ImgFrame.Type.RAW8)
-            leftImage.setWidth(self.monoRes[0])
-            leftImage.setHeight(self.monoRes[1])
-
+            leftDaiFrame = self.__createDaiFrame(leftFrame, frameTimestamp,
+                                                 monoRes,
+                                                 dai.CameraBoardSocket.LEFT,
+                                                 dai.ImgFrame.Type.RAW8)
             rightFrame = cv2.cvtColor(rightFrame, cv2.COLOR_BGR2GRAY)
-            rightImage = dai.ImgFrame()
-            rightImage.setData(
-                rightFrame.reshape(self.monoRes[0] * self.monoRes[1]))
-            rightImage.setTimestamp(frameTimestamp)
-            rightImage.setInstanceNum(dai.CameraBoardSocket.RIGHT)
-            rightImage.setType(dai.ImgFrame.Type.RAW8)
-            rightImage.setWidth(self.monoRes[0])
-            rightImage.setHeight(self.monoRes[1])
+            rightDaiFrame = self.__createDaiFrame(rightFrame, frameTimestamp,
+                                                  monoRes,
+                                                  dai.CameraBoardSocket.RIGHT,
+                                                  dai.ImgFrame.Type.RAW8)
 
-            leftInQ.send(leftImage)
-            rightInQ.send(rightImage)
+            leftInQ.send(leftDaiFrame)
+            rightInQ.send(rightDaiFrame)
 
             # Get depth output
             depthFrame = depthOutQ.get().getFrame()
-            depthPath = subDirPath.joinpath(f"{timestamp}.npy")
+            pathTimestamp = timestamp.replace(":", ";")
+            depthPath = subDirPath.joinpath(f"{pathTimestamp}.npy")
             np.save(str(depthPath), depthFrame)
 
             # Display disparity preview
             if self.preview:
-              disparityOut = disparityOutQ.tryGet()
-              if disparityOut is not None:
-                disparityFrame = disparityOut.getFrame()
-                disparityFrame = (disparityFrame * 255. /
-                                  self.maxDisparity).astype(np.uint8)
-                disparityFrame = cv2.applyColorMap(disparityFrame,
-                                                   cv2.COLORMAP_BONE)
-                disparityFrame = np.ascontiguousarray(disparityFrame)
-                cv2.imshow("Preview", disparityFrame)
+              rgbExist, rgbFrame = rgbCapture.read()
+              if rgbExist:
+                disparityFrame = disparityOutQ.get().getFrame()
+                self.__showPreview(rgbFrame, disparityFrame, "Preview",
+                                   timestamp)
                 if cv2.waitKey(1) == ord("q"):
                   print("\nCancel...")
                   break

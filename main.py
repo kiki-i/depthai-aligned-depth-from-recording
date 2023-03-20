@@ -3,8 +3,6 @@
 from estimator import *
 from parsecli import *
 
-import depthai as dai
-
 from pathlib import Path
 
 if __name__ == "__main__":
