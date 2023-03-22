@@ -16,6 +16,9 @@ class DepthEstimator():
         "accuracy": dai.node.StereoDepth.PresetMode.HIGH_ACCURACY
     }
 
+    if self.preview:
+      self.__createPreviewWindow("Preview")
+
     self.mode = modeMap[mode]
     self.preview = preview
     self.subpixel = subpixel
@@ -125,10 +128,8 @@ class DepthEstimator():
     leftCapture = cv2.VideoCapture(str(leftPath))
     rightCapture = cv2.VideoCapture(str(rightPath))
 
-    # Init preview
     if self.preview:
       rgbCapture = cv2.VideoCapture(str(rgbPath))
-      self.__createPreviewWindow("Preview")
 
     # Get resolution
     resMap = {

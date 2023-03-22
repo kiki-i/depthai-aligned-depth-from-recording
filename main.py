@@ -26,10 +26,10 @@ if __name__ == "__main__":
       inputDirs.append(path)
 
   results: dict[Path, bool] = {}
-  for inputDir in inputDirs:
-    depthEstimator = DepthEstimator(cliArgs.preview, cliArgs.mode,
-                                    cliArgs.subpixel, cliArgs.extended)
+  depthEstimator = DepthEstimator(cliArgs.preview, cliArgs.mode,
+                                  cliArgs.subpixel, cliArgs.extended)
 
+  for inputDir in inputDirs:
     results[inputDir] = depthEstimator.estimateFromVideo(
         inputDir,
         outputDirPath,
