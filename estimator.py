@@ -107,7 +107,7 @@ class DepthEstimator():
     self.__depthWeight = depthPercent
     self.__rgbWeight = 100 - self.__depthWeight
 
-  def estimateFromVideo(self, inputDirPath: Path, outputDirPath: Path) -> bool:
+  def estimateFromVideo(self, inputDirPath: Path, outDirPath: Path) -> bool:
 
     # Init path
     for path in inputDirPath.iterdir():
@@ -118,11 +118,11 @@ class DepthEstimator():
       if path.stem.endswith(f"right"):
         rightPath = path
 
-    timestampPath = inputDirPath.joinpath(f"timestamp.txt")
+    timestampPath = inputDirPath.joinpath(f"rgb-timestamp.txt")
     calibration = dai.CalibrationHandler(
         inputDirPath.joinpath("calibration.json"))
 
-    outputDirPath.mkdir(parents=True, exist_ok=True)
+    outDirPath.mkdir(parents=True, exist_ok=True)
 
     # Get video
     leftCapture = cv2.VideoCapture(str(leftPath))
@@ -149,7 +149,7 @@ class DepthEstimator():
       tag += "[Subpixel]"
     if self.extended:
       tag += "[Extended]"
-    subDirPath = outputDirPath.joinpath(f"{tag}/")
+    subDirPath = outDirPath.joinpath(f"{tag}/")
     subDirPath.mkdir(exist_ok=True)
 
     self.pipeline = self.__initPipeline(calibration, rgbRes, monoRes)

@@ -16,8 +16,8 @@ if __name__ == "__main__":
     raise FileNotFoundError(f"{inputDirPath.absolute()} don't esist!")
 
   ## Check output path
-  outputDirPath = Path(cliArgs.out)
-  outputDirPath.mkdir(parents=True, exist_ok=True)
+  outDirPath = Path(cliArgs.out)
+  outDirPath.mkdir(parents=True, exist_ok=True)
 
   ## Get file list
   inputDirs: list[Path] = []
@@ -32,7 +32,7 @@ if __name__ == "__main__":
   for inputDir in inputDirs:
     results[inputDir] = depthEstimator.estimateFromVideo(
         inputDir,
-        outputDirPath,
+        outDirPath,
     )
 
   for key, result in results.items():
